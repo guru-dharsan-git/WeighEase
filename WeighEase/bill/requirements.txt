@@ -1,5 +1,0 @@
-pymongo
-pandas
-matplotlib
-seaborn
-tkcalendar

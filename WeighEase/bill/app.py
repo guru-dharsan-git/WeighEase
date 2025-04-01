@@ -67,6 +67,7 @@ class WeightbridgeBillingSystem:
         self.style.map("Treeview.Heading",
                       background=[("active", self.secondary_color)])
         self.style.configure("Accent.TButton", background=self.success_color, foreground="white", font=button_font)
+        self.style.configure("Danger.TButton", background=self.danger_color, foreground="white", font=button_font)
         self.style.configure("TLabelframe", background="#f5f6fa")
         self.style.configure("TLabelframe.Label", background="#f5f6fa", foreground=self.primary_color, font=heading_font)
 
@@ -163,6 +164,14 @@ class WeightbridgeBillingSystem:
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
         
+        # Add a toolbar for record actions
+        actions_toolbar = ttk.Frame(table_frame)
+        actions_toolbar.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        
+        # Add Edit and Delete buttons
+        ttk.Button(actions_toolbar, text="Edit Entry", command=self.edit_record, width=15).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(actions_toolbar, text="Delete Entry", command=self.delete_record, style="Danger.TButton", width=15).pack(side=tk.LEFT)
+        
         # Bind select event
         self.tree.bind('<<TreeviewSelect>>', self.on_record_select)
 
@@ -190,12 +199,12 @@ class WeightbridgeBillingSystem:
         # Party Name
         ttk.Label(details_frame, text="Party Name:").grid(row=1, column=0, padx=(0, 10), pady=8, sticky=tk.W)
         self.bill_party_var = tk.StringVar()
-        ttk.Entry(details_frame, textvariable=self.bill_party_var, width=30, state="readonly").grid(row=1, column=1, padx=0, pady=8, sticky="ew")
+        ttk.Entry(details_frame, textvariable=self.bill_party_var, width=30).grid(row=1, column=1, padx=0, pady=8, sticky="ew")
         
         # Net Weight
         ttk.Label(details_frame, text="Net Weight (kg):").grid(row=2, column=0, padx=(0, 10), pady=8, sticky=tk.W)
         self.net_weight_var = tk.StringVar()
-        ttk.Entry(details_frame, textvariable=self.net_weight_var, width=15, state="readonly").grid(row=2, column=1, padx=0, pady=8, sticky="ew")
+        ttk.Entry(details_frame, textvariable=self.net_weight_var, width=15).grid(row=2, column=1, padx=0, pady=8, sticky="ew")
         
         # Right column - Rate and total calculation
         calc_frame = ttk.Frame(billing_frame)
@@ -219,6 +228,9 @@ class WeightbridgeBillingSystem:
         self.total_var = tk.StringVar()
         ttk.Entry(calc_frame, textvariable=self.total_var, width=15, state="readonly").grid(row=1, column=1, padx=0, pady=8, sticky="ew")
         
+        # Save changes button
+        ttk.Button(calc_frame, text="Save Changes", command=self.save_record_changes, style="Accent.TButton", width=12).grid(row=1, column=2, padx=10, pady=8)
+        
         # Add a frame for bill actions
         actions_frame = ttk.Frame(billing_frame)
         actions_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
@@ -239,15 +251,21 @@ class WeightbridgeBillingSystem:
         self.status.config(text="Loading data...", foreground=self.primary_color)
         self.tree.delete(*self.tree.get_children())
         try:
-            for i, doc in enumerate(self.collection.find({}, {"sno": 1, "party_name": 1, "net_weight": 1}).sort("sno", -1)):
+            for i, doc in enumerate(self.collection.find({}, {"sno": 1, "party_name": 1, "net_weight": 1, "rate": 1, "total_amount": 1}).sort("sno", -1)):
                 tag = 'evenrow' if i % 2 == 0 else 'oddrow'
                 net_weight = self.safe_float(doc.get("net_weight"))
+                rate = self.safe_float(doc.get("rate", 0))
+                total_amount = self.safe_float(doc.get("total_amount", 0))
+                
+                rate_display = f"{rate:.2f}" if rate else ""
+                total_display = f"{total_amount:,.2f}" if total_amount else ""
+                
                 self.tree.insert("", "end", values=(
                     doc.get("sno"),
                     doc.get("party_name"),
                     f'{net_weight:.2f}',
-                    "",  # Rate column (empty initially)
-                    ""   # Total Amount column (empty initially)
+                    rate_display,
+                    total_display
                 ), tags=(tag,))
             self.status.config(text=f"Loaded {len(self.tree.get_children())} records", foreground=self.primary_color)
         except Exception as e:
@@ -275,15 +293,21 @@ class WeightbridgeBillingSystem:
         self.status.config(text="Applying filters...", foreground=self.primary_color)
         self.tree.delete(*self.tree.get_children())
         try:
-            for i, doc in enumerate(self.collection.find(query, {"sno": 1, "party_name": 1, "net_weight": 1}).sort("sno", -1)):
+            for i, doc in enumerate(self.collection.find(query, {"sno": 1, "party_name": 1, "net_weight": 1, "rate": 1, "total_amount": 1}).sort("sno", -1)):
                 tag = 'evenrow' if i % 2 == 0 else 'oddrow'
                 net_weight = self.safe_float(doc.get("net_weight"))
+                rate = self.safe_float(doc.get("rate", 0))
+                total_amount = self.safe_float(doc.get("total_amount", 0))
+                
+                rate_display = f"{rate:.2f}" if rate else ""
+                total_display = f"{total_amount:,.2f}" if total_amount else ""
+                
                 self.tree.insert("", "end", values=(
                     doc.get("sno"),
                     doc.get("party_name"),
                     f'{net_weight:.2f}',
-                    "",  # Rate column (empty initially)
-                    ""   # Total Amount column (empty initially)
+                    rate_display,
+                    total_display
                 ), tags=(tag,))
             self.status.config(text=f"Loaded {len(self.tree.get_children())} filtered records", foreground=self.primary_color)
         except Exception as e:
@@ -297,14 +321,14 @@ class WeightbridgeBillingSystem:
             
         # Get values from the selected row
         values = self.tree.item(selected_item[0], 'values')
-        if len(values) >= 3:
+        if len(values) >= 5:
             self.sno_var.set(values[0])
             self.bill_party_var.set(values[1])
             self.net_weight_var.set(values[2])
             
-            # Clear rate and total
-            self.rate_var.set("")
-            self.total_var.set("")
+            # Set rate and total if they exist
+            self.rate_var.set(values[3] if values[3] else "")
+            self.total_var.set(values[4] if values[4] else "")
 
     def calculate_total(self):
         rate_str = self.rate_var.get().strip()
@@ -342,8 +366,159 @@ class WeightbridgeBillingSystem:
                 text=f"Calculated Amount: Rs.{total_amount:,.2f} | Rate: Rs.{rate}/kg | Net Weight: {net_weight} kg", 
                 foreground=self.primary_color
             )
+            
+            # Ask if user wants to save the calculation to database
+            if messagebox.askyesno("Save Calculation", "Do you want to save this rate and total amount to the database?"):
+                self.update_record_in_db()
+            
         except Exception as e:
             messagebox.showerror("Calculation Error", f"Error in calculation: {str(e)}")
+    
+    def update_record_in_db(self):
+        """Update the rate and total amount in the database"""
+        if not self.sno_var.get():
+            messagebox.showwarning("Selection Error", "Please select a record first.")
+            return
+            
+        try:
+            sno = self.sno_var.get()
+            rate = self.safe_float(self.rate_var.get())
+            total_amount = self.safe_float(self.total_var.get().replace(',', ''))
+            
+            # Update in MongoDB
+            result = self.collection.update_one(
+                {"sno": sno},
+                {"$set": {"rate": rate, "total_amount": total_amount}}
+            )
+            
+            if result.modified_count > 0:
+                self.status.config(
+                    text=f"Updated record {sno} with rate Rs.{rate:.2f} and total Rs.{total_amount:,.2f}", 
+                    foreground=self.success_color
+                )
+            else:
+                self.status.config(text=f"No changes made to record {sno}", foreground=self.primary_color)
+                
+        except Exception as e:
+            messagebox.showerror("Update Error", f"Error updating record in database: {str(e)}")
+            self.status.config(text="Database update failed", foreground=self.danger_color)
+    
+    def edit_record(self):
+        """Enable editing of the selected record"""
+        if not self.tree.selection():
+            messagebox.showwarning("Selection Required", "Please select a record to edit.")
+            return
+            
+        # The entries are already set from the selection event
+        # Just inform the user they can edit the values now
+        messagebox.showinfo("Edit Mode", 
+            "You can now edit the Party Name, Net Weight, and Rate.\n"
+            "After making changes, click 'Calculate' to update the total amount,\n"
+            "then click 'Save Changes' to update the database."
+        )
+
+    def save_record_changes(self):
+        """Save all changes to the selected record"""
+        if not self.sno_var.get():
+            messagebox.showwarning("Selection Error", "Please select a record first.")
+            return
+            
+        try:
+            sno = self.sno_var.get()
+            party_name = self.bill_party_var.get()
+            net_weight = self.safe_float(self.net_weight_var.get())
+            rate = self.safe_float(self.rate_var.get()) if self.rate_var.get() else 0
+            
+            # Recalculate total amount to ensure consistency
+            total_amount = net_weight * rate
+            
+            # Update in MongoDB
+            result = self.collection.update_one(
+                {"sno": sno},
+                {"$set": {
+                    "party_name": party_name,
+                    "net_weight": net_weight,
+                    "rate": rate,
+                    "total_amount": total_amount
+                }}
+            )
+            
+            if result.modified_count > 0:
+                # Update the total_var to reflect any changes
+                self.total_var.set(f"{total_amount:,.2f}")
+                
+                # Update the treeview
+                selected_item = self.tree.selection()
+                if selected_item:
+                    self.tree.item(selected_item[0], values=(
+                        sno,
+                        party_name,
+                        f"{net_weight:.2f}",
+                        f"{rate:.2f}" if rate else "",
+                        f"{total_amount:,.2f}" if total_amount else ""
+                    ))
+                
+                self.status.config(
+                    text=f"Updated record {sno} successfully", 
+                    foreground=self.success_color
+                )
+                messagebox.showinfo("Update Successful", "Record updated successfully in the database.")
+            else:
+                self.status.config(text=f"No changes made to record {sno}", foreground=self.primary_color)
+                
+        except Exception as e:
+            messagebox.showerror("Update Error", f"Error updating record: {str(e)}")
+            self.status.config(text="Record update failed", foreground=self.danger_color)
+
+    def delete_record(self):
+        """Delete the selected record from the database"""
+        selected_item = self.tree.selection()
+        if not selected_item:
+            messagebox.showwarning("Selection Required", "Please select a record to delete.")
+            return
+            
+        values = self.tree.item(selected_item[0], 'values')
+        sno = values[0]
+        party_name = values[1]
+        
+        # Confirm deletion
+        if not messagebox.askyesno("Confirm Delete", 
+            f"Are you sure you want to delete the following record?\n\n"
+            f"S.No: {sno}\n"
+            f"Party: {party_name}\n\n"
+            "This action cannot be undone."
+        ):
+            return
+            
+        try:
+            # Delete from MongoDB
+            result = self.collection.delete_one({"sno": sno})
+            
+            if result.deleted_count > 0:
+                # Remove from treeview
+                self.tree.delete(selected_item)
+                
+                # Clear form fields
+                self.sno_var.set("")
+                self.bill_party_var.set("")
+                self.net_weight_var.set("")
+                self.rate_var.set("")
+                self.total_var.set("")
+                
+                self.status.config(
+                    text=f"Deleted record {sno} successfully", 
+                    foreground=self.danger_color
+                )
+                messagebox.showinfo("Delete Successful", "Record deleted successfully from the database.")
+            else:
+                self.status.config(text=f"Record {sno} not found in database", foreground=self.danger_color)
+                messagebox.showwarning("Delete Failed", "Record not found in the database. The interface will be refreshed.")
+                # Refresh the data to ensure consistency
+                self.load_all_data()
+                
+        except Exception as e:
+            messagebox.showerror("Delete Error", f"Error deleting record: {str(e)}")
+            self.status.config(text="Record deletion failed", foreground=self.danger_color)
 
     def generate_bill_content(self):
         """Generate bill content as a string, replacing ₹ with Rs."""

@@ -1,0 +1,7 @@
+pymongo
+pandas
+matplotlib
+seaborn
+tkcalendar
+reportlab
+openpyxl
